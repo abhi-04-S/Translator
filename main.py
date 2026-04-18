@@ -20,6 +20,9 @@ TIME_WORDS = ["today", "tomorrow", "yesterday", "now"]
 # ❓ Question words
 QUESTION_WORDS = ["what", "where", "why", "when", "how", "who"]
 
+# 🎯 Important keywords (for your limited DB)
+KEYWORDS = ["doctor", "hospital", "blood"]
+
 
 @app.post("/process")
 def process(data: dict):
@@ -42,16 +45,28 @@ def process(data: dict):
     # 🧠 2. NLP Parsing
     for token in doc:
 
-        # 👤 Subject
+        # 👤 Subject (normal subject)
         if "subj" in token.dep_:
             subject = normalize_pronoun(token.text)
 
+        # 🔥 Possessive handling (MY, YOUR, etc.)
+        elif token.dep_ == "poss":
+            subject = normalize_pronoun(token.text)
+
+        # 🔥 Direct pronoun fallback
+        elif token.text in ["i", "me", "my", "you"]:
+            subject = normalize_pronoun(token.text)
+
         # ⚡ Verb
-        elif token.dep_ == "ROOT":
+        if token.dep_ == "ROOT":
             verb = token.lemma_.upper()
 
-        # 🎯 Object (accurate)
+        # 🎯 Object (accurate dependency)
         elif "obj" in token.dep_ or token.dep_ == "pobj":
+            obj = token.text.upper()
+
+        # 🔥 Force capture important keywords
+        if token.text in KEYWORDS:
             obj = token.text.upper()
 
         # 🔥 Fallback object detection
@@ -74,7 +89,7 @@ def process(data: dict):
         if token.text in ["danger", "fire", "help", "accident"]:
             extra = token.text.upper()
 
-        # ❓ Question
+        # ❓ Question words
         if token.text in QUESTION_WORDS:
             is_question = True
 
@@ -107,11 +122,11 @@ def process(data: dict):
     if is_question:
         isl_parts.append("QUESTION")
 
-    # 🛟 4. Fallback
+    # 🛟 4. Fallback (if nothing extracted)
     if not isl_parts:
         isl_parts = [token.text.upper() for token in doc if token.is_alpha]
 
-    # 🔥 Remove duplicates while preserving order
+    # 🔥 Remove duplicates
     isl_parts = list(dict.fromkeys(isl_parts))
 
     isl = " ".join(isl_parts)
