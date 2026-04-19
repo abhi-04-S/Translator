@@ -20,15 +20,18 @@ TIME_WORDS = ["today", "tomorrow", "yesterday", "now"]
 # ❓ Question words
 QUESTION_WORDS = ["what", "where", "why", "when", "how", "who"]
 
-# 🎯 Important keywords (for your limited DB)
+# 🎯 Important keywords
 KEYWORDS = ["doctor", "hospital", "blood"]
+
+# 🚫 Words to ignore as objects
+IGNORE_WORDS = ["life", "thing", "something"]
 
 
 @app.post("/process")
 def process(data: dict):
     text = data.get("text", "").lower().strip()
 
-    # 🚨 1. Emergency shortcut
+    # 🚨 Emergency shortcut
     if text in EMERGENCY_MAP:
         return build_response(text, EMERGENCY_MAP[text])
 
@@ -42,18 +45,16 @@ def process(data: dict):
     time_context = ""
     is_question = False
 
-    # 🧠 2. NLP Parsing
+    # 🧠 NLP Parsing
     for token in doc:
 
-        # 👤 Subject (normal subject)
+        # 👤 Subject
         if "subj" in token.dep_:
             subject = normalize_pronoun(token.text)
 
-        # 🔥 Possessive handling (MY, YOUR, etc.)
         elif token.dep_ == "poss":
             subject = normalize_pronoun(token.text)
 
-        # 🔥 Direct pronoun fallback
         elif token.text in ["i", "me", "my", "you"]:
             subject = normalize_pronoun(token.text)
 
@@ -61,19 +62,20 @@ def process(data: dict):
         if token.dep_ == "ROOT":
             verb = token.lemma_.upper()
 
-        # 🎯 Object (accurate dependency)
+        # 🎯 Object via dependency
         elif "obj" in token.dep_ or token.dep_ == "pobj":
             obj = token.text.upper()
 
-        # 🔥 Force capture important keywords
+        # 🎯 Force important keywords
         if token.text in KEYWORDS:
             obj = token.text.upper()
 
-        # 🔥 Fallback object detection
+        # 🔥 FIX: include ADJECTIVES also
         if (
             not obj
-            and token.pos_ == "NOUN"
+            and token.pos_ in ["NOUN", "ADJ"]
             and token.text not in TIME_WORDS
+            and token.text not in IGNORE_WORDS
         ):
             obj = token.text.upper()
 
@@ -89,7 +91,7 @@ def process(data: dict):
         if token.text in ["danger", "fire", "help", "accident"]:
             extra = token.text.upper()
 
-        # ❓ Question words
+        # ❓ Question
         if token.text in QUESTION_WORDS:
             is_question = True
 
@@ -97,10 +99,13 @@ def process(data: dict):
     if "?" in text:
         is_question = True
 
-    # 🔄 3. Build ISL structure
+    # 🔥 REMOVE "BE" (ISL doesn’t use it)
+    if verb == "BE":
+        verb = ""
+
+    # 🔄 Build ISL
     isl_parts = []
 
-    # Priority: Time → Condition → Object → Subject → Verb
     if time_context:
         isl_parts.append(time_context)
 
@@ -122,11 +127,11 @@ def process(data: dict):
     if is_question:
         isl_parts.append("QUESTION")
 
-    # 🛟 4. Fallback (if nothing extracted)
+    # 🛟 fallback
     if not isl_parts:
         isl_parts = [token.text.upper() for token in doc if token.is_alpha]
 
-    # 🔥 Remove duplicates
+    # 🔥 remove duplicates
     isl_parts = list(dict.fromkeys(isl_parts))
 
     isl = " ".join(isl_parts)
@@ -134,7 +139,6 @@ def process(data: dict):
     return build_response(text, isl)
 
 
-# 🧩 Normalize pronouns
 def normalize_pronoun(word):
     mapping = {
         "i": "I",
@@ -149,7 +153,6 @@ def normalize_pronoun(word):
     return mapping.get(word, word.upper())
 
 
-# 📦 Response format
 def build_response(text, isl):
     return {
         "input": text,
